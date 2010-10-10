@@ -1,0 +1,3 @@
+
+ruby -e 'require "open-uri";open("http://www.irchelp.org/irchelp/rfc/rfc2812.txt").read.scan(/Command: (\w+)\n   Parameters:(.+)$/)'
+http://github.com/jsimmons/ragel-irc-parser/blob/master/src/irc-parser.rl

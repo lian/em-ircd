@@ -1,0 +1,137 @@
+{
+  "PASS": {
+    "args_doc": " <password>"
+  },
+  "NICK": {
+    "args_doc": " <nickname>"
+  },
+  "USER": {
+    "args_doc": " <user> <mode> <unused> <realname>"
+  },
+  "OPER": {
+    "args_doc": " <name> <password>"
+  },
+  "MODE": {
+    "args_doc": " <channel> *( ( \"-\" / \"+\" ) *<modes> *<modeparams> )"
+  },
+  "SERVICE": {
+    "args_doc": " <nickname> <reserved> <distribution> <type>"
+  },
+  "QUIT": {
+    "args_doc": " [ <Quit Message> ]"
+  },
+  "SQUIT": {
+    "args_doc": " <server> <comment>"
+  },
+  "JOIN": {
+    "args_doc": " ( <channel> *( \",\" <channel> ) [ <key> *( \",\" <key> ) ] )"
+  },
+  "PART": {
+    "args_doc": " <channel> *( \",\" <channel> ) [ <Part Message> ]"
+  },
+  "TOPIC": {
+    "args_doc": " <channel> [ <topic> ]"
+  },
+  "NAMES": {
+    "args_doc": " [ <channel> *( \",\" <channel> ) [ <target> ] ]"
+  },
+  "LIST": {
+    "args_doc": " [ <channel> *( \",\" <channel> ) [ <target> ] ]"
+  },
+  "INVITE": {
+    "args_doc": " <nickname> <channel>"
+  },
+  "KICK": {
+    "args_doc": " <channel> *( \",\" <channel> ) <user> *( \",\" <user> )"
+  },
+  "PRIVMSG": {
+    "args_doc": " <msgtarget> <text to be sent>"
+  },
+  "NOTICE": {
+    "args_doc": " <msgtarget> <text>"
+  },
+  "MOTD": {
+    "args_doc": " [ <target> ]"
+  },
+  "LUSERS": {
+    "args_doc": " [ <mask> [ <target> ] ]"
+  },
+  "VERSION": {
+    "args_doc": " [ <target> ]"
+  },
+  "STATS": {
+    "args_doc": " [ <query> [ <target> ] ]"
+  },
+  "LINKS": {
+    "args_doc": " [ [ <remote server> ] <server mask> ]"
+  },
+  "TIME": {
+    "args_doc": " [ <target> ]"
+  },
+  "CONNECT": {
+    "args_doc": " <target server> <port> [ <remote server> ]"
+  },
+  "TRACE": {
+    "args_doc": " [ <target> ]"
+  },
+  "ADMIN": {
+    "args_doc": " [ <target> ]"
+  },
+  "INFO": {
+    "args_doc": " [ <target> ]"
+  },
+  "SERVLIST": {
+    "args_doc": " [ <mask> [ <type> ] ]"
+  },
+  "SQUERY": {
+    "args_doc": " <servicename> <text>"
+  },
+  "WHO": {
+    "args_doc": " [ <mask> [ \"o\" ] ]"
+  },
+  "WHOIS": {
+    "args_doc": " [ <target> ] <mask> *( \",\" <mask> )"
+  },
+  "WHOWAS": {
+    "args_doc": " <nickname> *( \",\" <nickname> ) [ <count> [ <target> ] ]"
+  },
+  "KILL": {
+    "args_doc": " <nickname> <comment>"
+  },
+  "PING": {
+    "args_doc": " <server1> [ <server2> ]"
+  },
+  "PONG": {
+    "args_doc": " <server> [ <server2> ]"
+  },
+  "ERROR": {
+    "args_doc": " <error message>"
+  },
+  "AWAY": {
+    "args_doc": " [ <text> ]"
+  },
+  "REHASH": {
+    "args_doc": " None"
+  },
+  "DIE": {
+    "args_doc": " None"
+  },
+  "RESTART": {
+    "args_doc": " None"
+  },
+  "SUMMON": {
+    "args_doc": " <user> [ <target> [ <channel> ] ]"
+  },
+  "USERS": {
+    "args_doc": " [ <target> ]"
+  },
+  "WALLOPS": {
+    "args_doc": " <Text to be sent>"
+  },
+  "USERHOST": {
+    "args_doc": " <nickname> *( SPACE <nickname> )"
+  },
+  "ISON": {
+    "args_doc": " <nickname> *( SPACE <nickname> )"
+  }
+}
