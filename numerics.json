@@ -295,6 +295,10 @@
     "RPL_UNIQOPIS",
     "%s %s"
   ],
+  "329": [
+    "RPL_CREATIONTIME",
+    "%s %s"
+  ],
   "331": [
     "RPL_NOTOPIC",
     "%s :No topic is set"
