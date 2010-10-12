@@ -1,13 +1,12 @@
 
 begin
   require 'json'
-  json = JSON.parse(File.read('numerics.json')
-  jm = {}; json.each{|k,v| jm[v[0]] = [k,*v[1..-1]] }
   module IRC
-    Numerics = json
-    Msg = jm
+    Numerics = JSON.parse(File.read('numerics.json'))
+    Msg = {}; Numerics.each{|k,v| Msg[v[0]] = [k,*v[1..-1]] }
   end
 rescue => ex
+  p ex.message
   raise "can't load numerics.json"
 end
 
@@ -21,12 +20,12 @@ CommandProc_Table = {
       conn.send_numeric(*IRC::Msg['ERR_NONICKNAMEGIVEN'])
     elsif !IRC.validate_nick(args[0])
       conn.send_numeric(*IRC::Msg['ERR_ERRONEUSNICKNAME'], args[0])
-    elsif Users.find args[0]
+    elsif IRC::Users.find(args[0])
       conn.send_numeric(*IRC::Msg['ERR_NICKNAMEINUSE'], args[0])
     else
       conn.nick = args[0]
     end
-  }
+  },
 
   'USER' => proc{|args,conn|
     if args.size < 4
@@ -47,22 +46,22 @@ CommandProc_Table = {
     if $config['opers'].select{|oper|oper['login'].downcase==name && oper['pass']==pass}.first
       conn.opered = true
       conn.send_numeric(*IRC::Msg['RPL_YOUREOPER'])
-      conn.join $config['oper_channel'] if $config['oper_channel']
+      conn.join_channel($config['oper_channel']) if $config['oper_channel']
     else
       conn.send_numeric(*IRC::Msg['ERR_NOOPERHOST'])
     end
   },
 
   'MODE' => proc{|args,conn|
-    target = Channels.find(args[0]) || Users.find(args[0])
+    target = conn.server.channels.find(args[0]) || conn.server.users.find(args[0])
 
     if target.is_a? IRC::Channel
+      channel = target
       if args.size < 2
-        channel = target
         conn.send_numeric(*IRC::Msg['RPL_CHANNELMODEIS'],
                           channel.name, "+#{channel.modes}")
-        #conn.send_numeric(*IRC::Msg['RPL_CREATIONTIME'],
-        #                  channel.name, channel.mode_timestamp.to_i)
+        conn.send_numeric(*IRC::Msg['RPL_CREATIONTIME'],
+                          channel.name, channel.mode_timestamp.to_i)
       else
         IRC.change_chmode(conn, channel, args[1], args[2..-1])
       end
@@ -90,12 +89,34 @@ CommandProc_Table = {
     if args.empty? || args[0].size < 1
       conn.send_numeric(*IRC::Msg['ERR_NEEDMOREPARAMS'], 'JOIN')
     else
-      conn.join(args[0])
+      target  = args[0]
+      channel = conn.server.channels.find(target)
+      
+      if !IRC.validate_chan(target)
+        conn.send_numeric(*IRC::Msg['ERR_NOSUCHCHANNEL'], target)
+      elsif conn.channels.size >= ($config['max_channels_per_user'] || 4).to_i
+        conn.send_numeric(*IRC::Msg['ERR_TOOMANYCHANNELS'], target)
+      elsif channel && channel.has_mode?('i')
+        conn.send_numeric(*IRC::Msg['ERR_INVITEONLYCHAN'], '%s', 'Cannot join channel (+i)')
+      else
+        channel ||= conn.server.channels.find_or_create(target)
+        if !channel.users.include?(conn)
+          channel.join(conn)
+          # send topic
+          conn.send_numeric(*IRC::Msg['RPL_TOPIC'], channel.name, channel.topic)
+          conn.send_numeric(*IRC::Msg['RPL_TOPICWHOTIME'],
+                            channel.name, channel.topic_author, channel.topic_timestamp.to_i)
+          # send names
+          nicks   = channel.users.map{|user| IRC.prefix_for(channel) + user.nick }
+          conn.send_numeric(*IRC::Msg['RPL_NAMREPLY'],   channel.name, nicks.join(' '))
+          conn.send_numeric(*IRC::Msg['RPL_ENDOFNAMES'], channel.name)
+        end
+      end
     end
   },
 
   'PART' => proc{|args,conn|
-    channel = Channels.find(args[0])
+    channel = conn.server.channels.find(args[0])
     if !channel
       conn.send_numeric(*IRC::Msg['ERR_NOSUCHCHANNEL'], args[0])
     elsif channel.users.include?(conn)
@@ -106,7 +127,7 @@ CommandProc_Table = {
   },
 
   'TOPIC' => proc{|args,conn|
-    channel = Channels.find(args[0])
+    channel = conn.server.channels.find(args[0])
     if args.size < 2
       if channel.topic
         conn.send_numeric(*IRC::Msg['RPL_TOPIC'], channel.name, channel.topic)
@@ -123,7 +144,7 @@ CommandProc_Table = {
   },
 
   'NAMES' => proc{|args,conn|
-    channel = Channels.find(args[0])
+    channel = conn.server.channels.find(args[0])
     nicks   = channel.users.map{|user| IRC.prefix_for(channel) + user.nick }
     conn.send_numeric(*IRC::Msg['RPL_NAMREPLY'],   channel.name, nicks.join(' '))
     conn.send_numeric(*IRC::Msg['RPL_ENDOFNAMES'], channel.name)
@@ -141,17 +162,17 @@ CommandProc_Table = {
         elsif arg =~ />([0-9]+)/
           min = $1.to_i
         elsif arg[0,1] == '!'
-          not_pattern = Regexp::escape(args[1][1..-1]).gsub('\*','.*').gsub('\?', '.')
+          not_pattern = Regexp.escape(args[1][1..-1]).gsub('\*','.*').gsub('\?', '.')
           not_pattern = /^#{not_pattern}$/i
         else
-          pattern = Regexp::escape(args[1]).gsub('\*','.*').gsub('\?', '.')
+          pattern = Regexp.escape(args[1]).gsub('\*','.*').gsub('\?', '.')
           pattern = /^#{pattern}$/i
         end
       end
     end
 
     conn_channels = conn.channels
-    Channels.each do |k,channel|
+    conn.server.channels.each do |k,channel|
       next if channel.has_any_mode?('ps') && !conn_channels.include?(channel) && !@opered
       next if pattern && !(channel.name =~ pattern)
       next if not_pattern && channel.name =~ not_pattern
@@ -171,12 +192,12 @@ CommandProc_Table = {
     if args.size < 2
       conn.send_numeric(*IRC::Msg['ERR_NEEDMOREPARAMS'], 'KICK')
     else
-      channel, target = Channels.find(args[0]), Users.find(args[1])
+      channel, target = conn.server.channels.find(args[0]), conn.server.users.find(args[1])
 
       if !channel
         conn.send_numeric(*IRC::Msg['ERR_NOSUCHCHANNEL'], args[0])
       elsif !target
-        conn.send_numeric(*IRC::Msg['ERR_NOSUCHNICK'], args[1]
+        conn.send_numeric(*IRC::Msg['ERR_NOSUCHNICK'], args[1])
       #elsif !target
       elsif !IRC.is_on(channel, target)
         conn.send_numeric(*IRC::Msg['ERR_CHANOPRIVSNEEDED'], "#{target.nick} #{channel.name}")
@@ -189,31 +210,36 @@ CommandProc_Table = {
   },
 
   'PRIVMSG' => proc{|args,conn|
-    target = Channels.find(args[0]) || Users.find(args[0])
+    target = conn.server.channels.find(args[0]) || conn.server.users.find(args[0])
     if target.is_a? IRC::Channel
       target.message(conn, args[1])
     elsif target.is_a? IRC::Client
-      target.send(conn.path, :privmsg, target.nick, args[1])
+      target.send_reply(conn.path, :privmsg, target.nick, args[1])
     else
       conn.send_numeric(*IRC::Msg['ERR_NOSUCHNICK'], args[0])
     end
   },
 
   'NOTICE' => proc{|args,conn|
-    target = Channels.find(args[0]) || Users.find(args[0])
-    if target.is_a? IRC::Channel
-      target.notice(conn, args[1])
-    elsif target.is_a? IRC::Client
-      target.send(conn.path, :notice, target.nick, args[1])
+    if !conn.opered
+      conn.send_numeric(*IRC::Msg['RPL_INFO'], "Sorry, You have NO Permission to run NOTICE")
+      conn.send_numeric(*IRC::Msg['ERR_NOPRIVILEGES'])
     else
-      conn.send_numeric(*IRC::Msg['ERR_NOSUCHNICK'], args[0])
+      target = conn.server.channels.find(args[0]) || conn.server.users.find(args[0])
+      if target.is_a? IRC::Channel
+        target.notice(conn, args[1])
+      elsif target.is_a? IRC::Client
+        target.send_reply(conn.path, :notice, target.nick, args[1])
+      else
+        conn.send_numeric(*IRC::Msg['ERR_NOSUCHNICK'], args[0])
+      end
     end
   },
 
   'MOTD' => proc{|args,conn|
 		motd = $config['motd'] || nil #get_motd
 		if motd
-      conn.send_numeric(*IRC::Msg['RPL_MOTDSTART'], Server.name)
+      conn.send_numeric(*IRC::Msg['RPL_MOTDSTART'], conn.server.name)
 			motd.each_line{|line| conn.send_numeric(*IRC::Msg['RPL_MOTD'], line) }
       conn.send_numeric(*IRC::Msg['RPL_ENDOFMOTD'])
 		else
@@ -222,12 +248,12 @@ CommandProc_Table = {
   },
 
   'LUSERS' => proc{|args,conn|
-		opers     = Sserver.clients.select{|user| user.opered }.size
-		invisible = Server.clients.select{|user| user.has_umode?('i') }.size
-		total     = Server.clients.size
+		opers     = conn.server.clients.select{|user| user.opered }.size
+		invisible = conn.server.clients.select{|user| user.has_umode?('i') }.size
+		total     = conn.server.clients.size
     conn.send_numeric(*IRC::Msg['RPL_LUSERCLIENT'],   total-invisible, invisible, 1)
     conn.send_numeric(*IRC::Msg['RPL_LUSEROP'],       opers)
-    conn.send_numeric(*IRC::Msg['RPL_LUSERCHANNELS'], @server.channels.size)
+    conn.send_numeric(*IRC::Msg['RPL_LUSERCHANNELS'], conn.server.channels.size)
     conn.send_numeric(*IRC::Msg['RPL_LUSERME'],       total, 0)
     conn.send_numeric(*IRC::Msg['RPL_LOCALUSERS'],    total, total)
     conn.send_numeric(*IRC::Msg['RPL_GLOBALUSERS'],   total, total)
@@ -236,11 +262,11 @@ CommandProc_Table = {
   'VERSION' => proc{|args,conn| 
 		detailed = args[0]
 		if detailed
-			version = ['em-ircd-machine_0.1', Server.name, 'Rubinius  [Linux 2.6.ARCH]']
+			version = ['em-ircd-machine_0.1', conn.server.name, 'Rubinius  [Linux 2.6.ARCH]']
       conn.send_numeric(*IRC::Msg['RPL_VERSION'], *version)
-			#conn.send_reply(Server.name, :notice, @nick, 'libcurl/7.19.4 zlib/1.2.3')
+			#conn.send_reply(conn.server.name, :notice, @nick, 'libcurl/7.19.4 zlib/1.2.3')
 		end
-		$config['features'].clone.each_slice(13) do |slice| # Why 13? Ask freenode
+		($config['features'] || []).dup.each_slice(13) do |slice| # Why 13? Ask freenode
 			slice.map!{ |k,v| (v==true) ? k.upcase : "#{k.upcase}=#{v}" }
 			slice << 'are supported by this server'
       conn.send_numeric(*IRC::Msg['RPL_ISUPPORT'], slice.join(' '))
@@ -261,7 +287,7 @@ CommandProc_Table = {
   'WHOWAS' => proc{|args,conn| },
 
   'KILL' => proc{|args,conn|
-    target = Users.find(args[0])
+    target = conn.server.users.find(args[0])
     if args.size < 2
       conn.send_numeric(*IRC::Msg['ERR_NEEDMOREPARAMS'], 'KILL')
     elsif !conn.opered
@@ -274,7 +300,7 @@ CommandProc_Table = {
   },
 
   'PING' => proc{|args,conn|
-    conn.send(Server.name, :pong, Server.name, args[0])
+    conn.send_reply(conn.server.name, :pong, conn.server.name)
   },
   'PONG' => proc{|args,conn|
     # do nothing
@@ -295,7 +321,7 @@ CommandProc_Table = {
   'WALLOPS' => proc{|args,conn| },
 
   'USERHOST' => proc{|args,conn|
-    target = Users.find(args[0])
+    target = conn.server.users.find(args[0])
     if target
       conn.send_numeric(*IRC::Msg['RPL_USERHOST'],
                         "#{target.nick}=+#{target.ident}@#{target.ip}")
@@ -307,6 +333,9 @@ CommandProc_Table = {
   'ISON' => proc{|args,conn| },
 }
 
+
+require 'socket'
+require 'eventmachine'
 
 module IRC
   class Channel
@@ -321,48 +350,47 @@ module IRC
       @name = name
       @users, @owners, @protecteds = [], [], []
       @ops, @halfops, @voices = [], [], []
-      @bans, @invex, @excepts = []
+      @bans, @invex, @excepts = [], [], []
       @modes, @mode_timestamp = 'ns', Time.now
     end
     
-    def send_to_all *args
-      @users.each {|user| user.send *args }
+    def send_to_all(*args)
+      @users.each{|user| user.send_reply *args }
     end
     
-    def send_to_all_except nontarget, *args
-      @users.each {|user| user.send *args if user != nontarget }
+    def send_to_all_except(nontarget, *args)
+      @users.each{|user| user.send_reply *args if user != nontarget }
     end
     
     def modes=(modes)
-      @modes = modes
-      @modes_timestamp = Time.now
+      @modes = modes; @modes_timestamp = Time.now
     end
     
     def topic=(topic)
-      @topic = topic
-      @topic_timestamp = Time.now
+      @topic = topic; @topic_timestamp = Time.now
     end
     
     def message(sender, message)
-      send_to_all_except sender, sender.path, :privmsg, @name, message
+      send_to_all_except(sender, sender.path, :privmsg, @name, message)
     end
+
     def notice(sender, message)
-      send_to_all_except sender, sender.path, :notice, @name, message
+      send_to_all_except(sender, sender.path, :notice, @name, message)
     end
     
-    def join client
+    def join(client)
       @ops << client if empty?
       @users << client
-      send_to_all client.path, :join, @name
+      send_to_all(client.path, :join, @name)
     end
     
-    def part client, message='Leaving'
-      send_to_all client.path, :part, @name, message
+    def part(client, message='Leaving')
+      send_to_all(client.path, :part, @name, message)
       remove client
     end
     
-    def kick client, kicker, reason=nil
-      send_to_all kicker, :kick, @name, client.nick, reason
+    def kick(client, kicker, reason=nil)
+      send_to_all(kicker, :kick, @name, client.nick, reason)
       remove client
     end
     
@@ -388,22 +416,28 @@ module IRC
     def has_any_mode? modes
       @modes.split('').select {|mode| has_mode?(mode) }.any?
     end
+    
   end
 
-  class Client < LineConnection
-    attr_reader :nick, :ident, :realname, :conn, :addr, :ip, :host, :dead, :umodes, :server
-    attr_accessor :server, :opered, :away, :created_at, :modified_at
+  class Client
+    attr_accessor :opered, :away, :created_at, :modified_at, :ident, :realname
+    attr_reader :nick, :addr, :ip, :host, :dead, :umodes
+    attr_reader :server, :conn, :cmd_table
 
-    def initialize(server)
-      super
-      @server = server
-      @server.clients << self
+    def initialize(server, conn)
       @nick, @umodes = '*', ''
       @protocols, @watch, @silence = [], [], []
       @created_at, @modified_at = Time.now, Time.now
-      @port, @ip = Socket.unpack_sockaddr_in get_peername
+      @port, @ip = Socket.unpack_sockaddr_in(conn.get_peername)
       @host = @ip
+      @cmd_table = CommandProc_Table.dup
 
+      @conn, @server = conn, server
+      @server.clients << self
+      post_init
+    end
+
+    def post_init
       send_reply(@server.name, :notice, 'AUTH', '*** Looking up your hostname...')
       send_reply(@server.name, :notice, 'AUTH', '*** Found your hostname')
     end
@@ -416,36 +450,25 @@ module IRC
     end
     def is_registered?; @nick != '*' && @ident; end
 
-    def check_registration
-      return unless is_registered?
-      @nick != '*' && @ident
-      send_welcome_flood
-      IRC.change_umode(self, '+iwx')
+    def is_not_registered?(command)
+      if !is_registered? && !['user', 'nick', 'quit', 'pong'].include?(command)
+        send_numeric(*IRC::Msg['ERR_NOTREGISTERED'])
+      end
     end
 
-    def unbind
-      super; close('Client disconnected')
-      @server.remove_client(self)
+    def check_registration
+      return unless is_registered?
+      IRC.send_welcome_flood(self)
+      IRC.change_umode(self, '+iwx')
+      if channel = $config['welcome_channel']
+        join_channel(channel)
+        send_numeric(*IRC::Msg['RPL_INFO'], "------------")
+        send_numeric(*IRC::Msg['RPL_INFO'], "moin, #{path}")
+        send_numeric(*IRC::Msg['RPL_INFO'], "  #{channel} auto-joined (window 2)")
+        send_numeric(*IRC::Msg['RPL_INFO'], "------------")
+     end
     end
-   
-    def close(reason='Client quit')
-      @server.log_nick(@nick, "User disconnected (#{reason}).")
-      return if @dead
-      
-      updated_users = [self]
-      self.channels.each do |channel|
-        channel.users.each do |user|
-          next if updated_users.include? user
-          user.send_reply(path, :quit, reason)
-          updated_users << user
-        end
-        channel.users.delete self
-      end; @dead = true
-      
-      send_reply(nil, :error, "Closing Link: #{@nick}[#{@ip}] (#{reason})")
-      close_connection
-    end
-    
+
     def rawkill(killer, message='Client quit')
       send_reply(killer, :kill, @nick, message); close(message)
     end
@@ -460,23 +483,13 @@ module IRC
       args = args.dup
       args.unshift(args.shift.to_s.upcase)
       args.unshift(":#{from}")  if from
-      args.push(":#{args.pop}") if args.last.to_s.include?(' ')
+      #args.push(":#{args.pop}") if args.last.to_s.include?(' ')
 
-      send_line args.join(' ')
+      conn.send_line args.join(' ')
     end
     
     def send_numeric(numeric, msg_pattern, *args)
       send_reply(@server.name, numeric, @nick, msg_pattern % args)
-    end
-    
-    def send_welcome_flood(conn)
-      conn.send_numeric('001', "Welcome to the #{$config['network_name']} IRC Network #{path}")
-      conn.send_numeric('002', "Your host is #{@server.name}, running version RubyIRCd0.1.0")
-      conn.send_numeric('003', "This server was created Tue Dec 23 2008 at 15:18:59 EST")
-      conn.send_numeric('004', @server.name, 'RubyIRCd0.1.0', 'iowghraAsORTVSxNCWqBzvdHtGp', 'lvhopsmntikrRcaqOALQbSeIKVfMCuzNTGj')
-      conn.send_version
-      conn.send_lusers
-      conn.send_motd
     end
     
     def nick=(newnick)
@@ -500,39 +513,97 @@ module IRC
       end
     end
     
+    def join_channel(name)
+      @cmd_table['JOIN'].call([name], self)
+    end
+    
     def channels
       @server.channels.values.select{|channel| channel.users.include?(self) }
     end
-    
-    def parse_line(line)  # Parse as per the RFC
+
+    # called by connection
+    def close(reason)
+      @server.log_nick(@nick, "User disconnected (#{reason}).")
+      return if @dead
+      
+      updated_users = [self]
+      self.channels.each do |channel|
+        channel.users.each do |user|
+          next if updated_users.include? user
+          user.send_reply(path, :quit, reason)
+          updated_users << user
+        end
+        channel.users.delete self
+      end; @dead = true
+      send_reply(nil, :error, "Closing Link: #{@nick}[#{@ip}] (#{reason})")
+      @server.remove_client(self)
+    end
+
+    def process_line(line)
+      p line if @server.debug
+      @modified_at = Time.now
+
+      # Parse as per the RFC
       raw_parts = line.chomp.split ' :', 2
       args = raw_parts.shift.split ' '
       args << raw_parts.first if raw_parts.any?
-    end
-
-    def receive_line line
-      p line if @server.debug
-      @modified_at = Time.now
-      
-      args    = parse_line(line)
       command = args.shift.downcase
 
-      @server.log_nick @nick, command
-      
-      if !is_registered? && !['user', 'nick', 'quit', 'pong'].include?(command)
-        send_numeric(*IRC::Msg['ERR_NOTREGISTERED']); return
+      @server.log_nick(@nick, command)
+      #p [command, @cmd_table[command]]
+
+      return if is_not_registered?(command)
+
+      if (cmd_proc = @cmd_table[command.upcase]) && cmd_proc.respond_to?(:call)
+        cmd_proc.call(args, self)
+        #cmd_proc.call(args, self, @conn, @server)
+      else
+        send_numeric(*IRC::Msg['ERR_UNKNOWNCOMMAND'], command.upcase)
       end
-      
-      case command
-        when nil
-          # ..
-        else
-          send_numeric(*IRC::Msg['ERR_UNKNOWNCOMMAND'], command.upcase)
-      end
-    
+
     rescue => ex
+      puts "RESCUE: Server-side #{ex.class}: #{ex.message}"
       puts ex.class, ex.message, ex.backtrace
-      skill "Server-side #{ex.class}: #{ex.message}"
+      skill "Server-side= ERROR Client"
+    end
+  end
+
+
+  class Connection < EM::Connection
+    attr_reader :client
+
+    def initialize(server)
+      @client = Client.new(server, self)
+      @buffer = ''
+    end
+
+    def post_init
+      @port, @ip = Socket.unpack_sockaddr_in get_peername
+      puts "Connected to #{@ip}:#{@port}"
+    end
+
+    def receive_data data
+      @buffer += data
+      while @buffer.include?("\n")
+        receive_line @buffer.slice!(0, @buffer.index("\n")+1).chomp
+      end
+    end
+
+    def receive_line(line)
+      @client.process_line(line)
+    end
+
+    def send_line(line)
+      send_data( "#{line.gsub("\n", '')}\n" )
+    end
+
+    def unbind
+      puts "Connection closed to #{@ip}:#{@port}"
+      close('Client disconnected'); super
+    end
+   
+    def close(reason='Client quit')
+      @client.close(reason); close_connection
     end
   end
 end
@@ -540,6 +611,16 @@ end
 
 module IRC
   module Helpers
+
+    def send_welcome_flood(client)
+      client.send_numeric(*IRC::Msg['RPL_WELCOME'], $config['network_name'])
+      client.send_numeric(*IRC::Msg['RPL_YOURHOST'], client.server.name, 'em-ircd.rb')
+      client.send_numeric(*IRC::Msg['RPL_CREATED'], 'Tue Jun 23 2010 at 10:00:01 EST')
+      client.send_numeric(*IRC::Msg['RPL_MYINFO'], client.server.name, 'em-irc.rb', 'hoe', 'down')
+      client.cmd_table['VERSION'].call([], client)
+      client.cmd_table['LUSERS'].call([], client)
+      client.cmd_table['MOTD'].call([], client)
+    end
 
     def validate_nick(nick)
       nick =~ /^[a-zA-Z\[\]_|`^][a-zA-Z0-9\[\]_|`^]{0,#{($config['max_nick_length'].to_i-1)||23}}$/
@@ -597,22 +678,23 @@ module IRC
     end
     
 
-    def change_umode(conn, changes_str, params=[])
+    def change_umode(client, changes_str, params=[])
       valid = 'oOaANCdghipqrstvwxzBGHRSTVW'
       str = IRC.parse_mode_string(changes_str, valid) do |add, char|
         next false unless valid.include? char
-        if conn.umodes.include?(char) ^ !add
+        if client.umodes.include?(char) ^ !add
           next false # Already set
         elsif add
-          conn.umodes << char
+          client.umodes << char
         else
-          conn.umodes = conn.umodes.delete char
+          client.umodes = client.umodes.delete char
         end
         true
       end
-      conn.send_reply(path, :mode, @nick, *str) if str.any?
+      client.send_reply(client.path, :mode, @nick, *str) if str.any?
       str
     end
+
     def change_chmode(conn, channel, changes_str, params=[])
       valid = 'vhoaqbceIfijklmnprstzACGMKLNOQRSTVu'
       str = IRC.parse_mode_string(changes_str, valid) do |add, char|
@@ -661,9 +743,10 @@ module IRC
         end
         true
       end
-      channel.send_to_all(path, :mode, channel.name, *str) if str.any?
+      channel.send_to_all(conn.path, :mode, channel.name, *str) if str.any?
       str
     end
+
     def parse_mode_string(mode_str, valid_modes)
       set, results, args = true, [], []
       mode_str.each_char do |mode_chr|
@@ -722,11 +805,12 @@ end
 
 module IRC
   class Server
-    attr_accessor :debug, :clients, :channels, :name, :running
+    attr_accessor :debug, :name, :running
+    attr_reader :clients, :users, :channels
 
-    def initialize(name=nil)
-      @name = name
-      @clients = []
+    def initialize(name=nil, users={}, channels={})
+      @name, @clients = name, []
+      @users, @channels = users, channels
       @debug, @running = true, false
     end
 
@@ -752,34 +836,35 @@ module IRC
   Config_Default = {
     'network_name' => 'uphVPN',
     'listen' => [
-      {'interface' => '0.0.0.0', 'port' => '6667' }
-      {'interface' => '0.0.0.0', 'port' => '7070', 'ssl' => 'on' }
+      {'interface' => '0.0.0.0', 'port' => '6667' },
+      #{'interface' => '0.0.0.0', 'port' => '7070', 'ssl' => 'on' },
     ],
     'opers' => [],
-    'oper_channel' => '#staff',
     'max_nick_length' => 24,
     'max_channel_length' => 24,
+    'oper_channel' => '#loop',
+    'welcome_channel' => '#unperfekthaus',
   }
 end
 
 begin
   require 'json'
-  $config = IRC::Config_Default.merge(
+  $config = IRC::Config_Default.dup.merge(
     JSON.parse(File.read(ARGV[0] || 'server-config.json'))
   )
 rescue => ex
-  raise 'No server-config.json found!!!'
+  #raise 'No server-config.json found!!!'
+  $config = IRC::Config_Default.dup
 end
 
-
 EM.run do
-  Server = IRC::Server.new
+  server = IRC::Server.new('uphVPN', IRC::Users, IRC::Channels)
 
-  Server_Sockets = $config['listen'].map do |i|
-    EM.start_server(i['interface'], i['port'].to_i, IRC::Client, $server
-  end
+  server_sockets = $config['listen'].map{|i|
+    EM.start_server(i['interface'], i['port'].to_i, IRC::Connection, server)
+  }
 
   EM.add_periodic_timer(60){
-    Server.clients.each{|c| c.send_reply(nil, :ping, server.name) }
+    server.clients.each{|c| c.send_reply(nil, :ping, server.name) }
   }
 end
