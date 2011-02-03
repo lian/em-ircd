@@ -1,38 +1,11 @@
 {
-  "name": [
-    "%s",
-    "Name of the channel"
-  ],
-  "topic": [
-    "Welcome to %s !",
-    "Topic of the channel"
-  ],
-  "key": [
-    null,
-    "Key to join the channel"
-  ],
-  "users": [
-    [],
-    "Users in the channel"
-  ],
-  "invites": [
-    [],
-    "Users invited to the channel"
-  ],
-  "bans": [
-    [],
-    "Banned user prefixes"
-  ],
-  "norms": [
-    [],
-    "Normal users in the channel"
-  ],
-  "voices": [
-    [],
-    "Voiced users in the channel"
-  ],
-  "ops": [
-    [],
-    "Operators in the channel"
-  ]
+  "name": [ "%s", "Name of the channel" ],
+  "topic": [ "Welcome to %s !", "Topic of the channel" ],
+  "key": [ null, "Key to join the channel" ],
+  "users": [ [], "Users in the channel" ],
+  "invites": [ [], "Users invited to the channel" ],
+  "bans": [ [], "Banned user prefixes" ],
+  "norms": [ [], "Normal users in the channel" ],
+  "voices": [ [], "Voiced users in the channel" ],
+  "ops": [ [], "Operators in the channel" ]
 }

@@ -1,4 +1,7 @@
 
+#
+# load numerics.json
+#
 begin
   require 'json'
   module IRC
@@ -6,8 +9,8 @@ begin
     Msg = {}; Numerics.each{|k,v| Msg[v[0]] = [k,*v[1..-1]] }
   end
 rescue => ex
-  p ex.message
-  raise "can't load numerics.json"
+  #p ex.message
+  raise "failed to load: numerics.json"
 end
 
 
@@ -89,7 +92,8 @@ CommandProc_Table = {
     if args.empty? || args[0].size < 1
       conn.send_numeric(*IRC::Msg['ERR_NEEDMOREPARAMS'], 'JOIN')
     else
-      target  = args[0]
+      #target  = args[0]
+      args[0].split(",").each{|target| # because of JOIN #fo,#ba input
       channel = conn.server.channels.find(target)
       
       if !IRC.validate_chan(target)
@@ -112,6 +116,7 @@ CommandProc_Table = {
           conn.send_numeric(*IRC::Msg['RPL_ENDOFNAMES'], channel.name)
         end
       end
+      }
     end
   },
 
@@ -335,7 +340,6 @@ CommandProc_Table = {
 
 
 require 'socket'
-require 'eventmachine'
 
 module IRC
   class Channel
@@ -523,8 +527,8 @@ module IRC
 
     # called by connection
     def close(reason)
-      @server.log_nick(@nick, "User disconnected (#{reason}).")
       return if @dead
+      @server.log_nick(@nick, "User disconnected (#{reason}).")
       
       updated_users = [self]
       self.channels.each do |channel|
@@ -534,13 +538,14 @@ module IRC
           updated_users << user
         end
         channel.users.delete self
-      end; @dead = true
+      end
+      @dead = true
       send_reply(nil, :error, "Closing Link: #{@nick}[#{@ip}] (#{reason})")
       @server.remove_client(self)
     end
 
     def process_line(line)
-      p line if @server.debug
+      #p line if @server.debug
       @modified_at = Time.now
 
       # Parse as per the RFC
@@ -549,7 +554,7 @@ module IRC
       args << raw_parts.first if raw_parts.any?
       command = args.shift.downcase
 
-      @server.log_nick(@nick, command)
+      @server.log_nick(@nick, [command, args].inspect)
       #p [command, @cmd_table[command]]
 
       return if is_not_registered?(command)
@@ -567,8 +572,14 @@ module IRC
       skill "Server-side= ERROR Client"
     end
   end
+end # IRC
 
 
+#
+# begin eventmachine code
+#
+require 'eventmachine'
+module IRC
   class Connection < EM::Connection
     attr_reader :client
 
@@ -580,9 +591,22 @@ module IRC
     def post_init
       @port, @ip = Socket.unpack_sockaddr_in get_peername
       puts "Connected to #{@ip}:#{@port}"
+
+      # process_line tick
+      @tick = proc{
+        if @buffer.include?("\n")
+          receive_line @buffer.slice!(0, @buffer.index("\n")+1).chomp
+          EM.next_tick(&@tick) if @buffer.include?("\n")
+        end
+      }
     end
 
     def receive_data data
+      @buffer += data
+      @tick.call
+    end
+
+    def receive_data_blocking data
       @buffer += data
       while @buffer.include?("\n")
         receive_line @buffer.slice!(0, @buffer.index("\n")+1).chomp
@@ -607,6 +631,9 @@ module IRC
     end
   end
 end
+#
+# end eventmachine code
+#
 
 
 module IRC
@@ -616,7 +643,7 @@ module IRC
       client.send_numeric(*IRC::Msg['RPL_WELCOME'], $config['network_name'])
       client.send_numeric(*IRC::Msg['RPL_YOURHOST'], client.server.name, 'em-ircd.rb')
       client.send_numeric(*IRC::Msg['RPL_CREATED'], 'Tue Jun 23 2010 at 10:00:01 EST')
-      client.send_numeric(*IRC::Msg['RPL_MYINFO'], client.server.name, 'em-irc.rb', 'hoe', 'down')
+      client.send_numeric(*IRC::Msg['RPL_MYINFO'], client.server.name, 'em-irc.rb', '.', '.')
       client.cmd_table['VERSION'].call([], client)
       client.cmd_table['LUSERS'].call([], client)
       client.cmd_table['MOTD'].call([], client)
@@ -833,8 +860,8 @@ module IRC
     end
   end
 
-  Config_Default = {
-    'network_name' => 'uphVPN',
+  DefaultConfig = {
+    'network_name' => 'em-ircd.testnet',
     'listen' => [
       {'interface' => '0.0.0.0', 'port' => '6667' },
       #{'interface' => '0.0.0.0', 'port' => '7070', 'ssl' => 'on' },
@@ -843,25 +870,31 @@ module IRC
     'max_nick_length' => 24,
     'max_channel_length' => 24,
     'oper_channel' => '#loop',
-    'welcome_channel' => '#unperfekthaus',
+    'welcome_channel' => '#welcome',
   }
 end
 
+#
+# load config
+#
 begin
   require 'json'
-  $config = IRC::Config_Default.dup.merge(
+  $config = IRC::DefaultConfig.dup.merge(
     JSON.parse(File.read(ARGV[0] || 'server-config.json'))
   )
 rescue => ex
-  #raise 'No server-config.json found!!!'
-  $config = IRC::Config_Default.dup
+  $config = IRC::DefaultConfig.dup
 end
 
+
 EM.run do
-  server = IRC::Server.new('uphVPN', IRC::Users, IRC::Channels)
+  puts "loading config for %s:\n%s" % [ $config['network_name'], JSON.pretty_generate($config) ]
+
+  server = IRC::Server.new($config['network_name'], IRC::Users, IRC::Channels)
 
   server_sockets = $config['listen'].map{|i|
     EM.start_server(i['interface'], i['port'].to_i, IRC::Connection, server)
+    puts "started em-ircd server at: %s:%s" % i.values_at('interface', 'port')
   }
 
   EM.add_periodic_timer(60){
