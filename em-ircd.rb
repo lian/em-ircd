@@ -306,7 +306,7 @@ CommandProc_Table = {
   },
 
   'TOPIC' => proc{|args,conn|
-    channel = conn.server.channels.find(args[0])
+    channel = conn.server.channels.find(args[0].to_s)
     if args.size < 2
       if channel.topic
         conn.send_numeric(*IRC::Msg['RPL_TOPIC'], channel.name, channel.topic)
@@ -319,6 +319,9 @@ CommandProc_Table = {
       conn.send_numeric(*IRC::Msg['ERR_CHANOPRIVSNEEDED'], channel.name)
     else
       channel.set_topic args[1], conn
+      conn.send_numeric(*IRC::Msg['RPL_TOPIC'], channel.name, channel.topic)
+      conn.send_numeric(*IRC::Msg['RPL_TOPICWHOTIME'],
+                        channel.name, channel.topic_author, channel.topic_timestamp.to_i)
     end
   },
 
@@ -727,7 +730,7 @@ module IRC
       args << raw_parts.first if raw_parts.any?
       command = args.shift.downcase
 
-      @server.log_nick(@nick, [command, args].inspect)
+      @server.log_nick(@nick, [command, args].inspect) unless command == 'pong'
       #p [command, @cmd_table[command]]
 
       return if is_not_registered?(command)
