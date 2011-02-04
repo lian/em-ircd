@@ -462,7 +462,21 @@ CommandProc_Table = {
   'SERVLIST' => proc{|args,conn| },
   'SQUERY' => proc{|args,conn| },
   'WHO' => proc{|args,conn| },
-  'WHOIS' => proc{|args,conn| },
+
+  'WHOIS' => proc{|args,conn|
+     nick = args.last.to_s
+     if target = conn.server.users.find(nick)
+       conn.send_numeric(*IRC::Msg['RPL_WHOISUSER'], target.nick, target.ident, target.host, target.realname )
+        #312     RPL_WHOISSERVER "<nick> <server> :<server info>"
+        #313     RPL_WHOISOPERATOR "<nick> :is an IRC operator"
+        #317     RPL_WHOISIDLE "<nick> <integer> :seconds idle"
+        #319     RPL_WHOISCHANNELS "<nick> :{[@|+]<channel><space>}"
+       conn.send_numeric(*IRC::Msg['RPL_ENDOFWHOIS'], nick)
+     else
+       conn.send_numeric(*IRC::Msg['ERR_NOSUCHNICK'], nick)
+     end
+   },
+
   'WHOWAS' => proc{|args,conn| },
 
   'KILL' => proc{|args,conn|
@@ -553,11 +567,11 @@ module IRC
     end
     
     def message(sender, message)
-      send_to_all_except(sender, sender.path, :privmsg, @name, message)
+      send_to_all_except(sender, sender.path, :privmsg, @name, ':' + message)
     end
 
     def notice(sender, message)
-      send_to_all_except(sender, sender.path, :notice, @name, message)
+      send_to_all_except(sender, sender.path, :notice, @name, ':' + message)
     end
     
     def join(client)
