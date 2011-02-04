@@ -730,7 +730,7 @@ module IRC
       args << raw_parts.first if raw_parts.any?
       command = args.shift.downcase
 
-      @server.log_nick(@nick, [command, args].inspect) unless command == 'pong'
+      @server.log_nick(@nick, [command, args].inspect) unless ['pong', 'ping'].include?(command)
       #p [command, @cmd_table[command]]
 
       return if is_not_registered?(command)
