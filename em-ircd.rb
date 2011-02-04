@@ -319,9 +319,6 @@ CommandProc_Table = {
       conn.send_numeric(*IRC::Msg['ERR_CHANOPRIVSNEEDED'], channel.name)
     else
       channel.set_topic args[1], conn
-      conn.send_numeric(*IRC::Msg['RPL_TOPIC'], channel.name, channel.topic)
-      conn.send_numeric(*IRC::Msg['RPL_TOPICWHOTIME'],
-                        channel.name, channel.topic_author, channel.topic_timestamp.to_i)
     end
   },
 
@@ -538,6 +535,10 @@ module IRC
     def send_to_all(*args)
       @users.each{|user| user.send_reply *args }
     end
+
+    def send_numeric_to_all(*args)
+      @users.each{|user| user.send_numeric *args }
+    end
     
     def send_to_all_except(nontarget, *args)
       @users.each{|user| user.send_reply *args if user != nontarget }
@@ -589,6 +590,9 @@ module IRC
       @topic, @topic_timestamp = topic, Time.now
       @topic_author = author.nick
       send_to_all(author, :topic, @name, topic)
+
+      send_numeric_to_all(*IRC::Msg['RPL_TOPIC'], @name, @topic)
+      send_numeric_to_all(*IRC::Msg['RPL_TOPICWHOTIME'], @name, @topic_author, @topic_timestamp.to_i)
     end
     
     def has_mode? mode
