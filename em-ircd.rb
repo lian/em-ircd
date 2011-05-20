@@ -323,10 +323,11 @@ CommandProc_Table = {
   },
 
   'NAMES' => proc{|args,conn|
-    channel = conn.server.channels.find(args[0])
-    nicks   = channel.users.map{|user| IRC.prefix_for(channel) + user.nick }
-    conn.send_numeric(*IRC::Msg['RPL_NAMREPLY'],   channel.name, nicks.join(' '))
-    conn.send_numeric(*IRC::Msg['RPL_ENDOFNAMES'], channel.name)
+    if args.first && channel = conn.server.channels.find(args.first)
+      nicks = channel.users.map{|user| IRC.prefix_for(channel) + user.nick }
+      conn.send_numeric(*IRC::Msg['RPL_NAMREPLY'],   channel.name, nicks.join(' '))
+      conn.send_numeric(*IRC::Msg['RPL_ENDOFNAMES'], channel.name)
+    end
   },
 
   'LIST' => proc{|args,conn|
@@ -734,6 +735,7 @@ module IRC
         channel.users.delete self
       end
       @dead = true
+      @conn.close_connection_after_writing
       send_reply(nil, :error, "Closing Link: #{@nick}[#{@ip}] (#{reason})")
       @server.remove_client(self)
     end
@@ -772,17 +774,23 @@ end # IRC
 #
 # begin eventmachine code
 #
-require 'eventmachine'
+begin
+  require 'eventpanda'
+rescue LoadError
+  require 'eventmachine'
+end
+
 module IRC
   class Connection < EM::Connection
     attr_reader :client
 
     def initialize(server)
-      @client = Client.new(server, self)
-      @buffer = ''
+      @buffer = ''; @server=server
     end
 
     def post_init
+      @client = Client.new(@server, self); @server=nil
+
       @port, @ip = Socket.unpack_sockaddr_in get_peername
       puts "Connected to #{@ip}:#{@port}"
 
@@ -825,6 +833,37 @@ module IRC
       @client.close(reason); close_connection
     end
   end
+
+  class Connection_SSL < Connection
+    alias :post_init_plain :post_init
+
+    def post_init
+      cfg, files = ($config||{}), ['private_key_file', 'cert_chain_file']
+
+      if files.all?{|i| cfg[i] && File.exists?(cfg[i]) }
+        @port, @ip = Socket.unpack_sockaddr_in get_peername
+        puts "SSL handshake with #{@ip}:#{@port}"
+
+        start_tls( :private_key_file => File.expand_path(cfg[ files[0] ]),
+                   :cert_chain_file  => File.expand_path(cfg[ files[1] ])  )
+        #start_tls
+      else
+        puts "ssl #{files.inspect} files not found!"
+        close_connection
+      end
+    end
+
+    def receive_data(data)
+      (@buffer += data; @tick.call) if @handshake_completed
+    end
+
+    def ssl_handshake_completed
+      @handshake_completed = true
+      #get_peer_cert
+      post_init_plain
+    end
+  end # Connection_SSL
+
 end
 #
 # end eventmachine code
@@ -1066,6 +1105,8 @@ module IRC
     'max_channel_length' => 24,
     'oper_channel' => '#loop',
     'welcome_channel' => '#welcome',
+    'private_key_file' => 'server.key',
+    'cert_chain_file' => 'server.crt'
   }
 end
 
@@ -1087,9 +1128,14 @@ EM.run do
 
   server = IRC::Server.new($config['network_name'], IRC::Users, IRC::Channels)
 
-  server_sockets = $config['listen'].map{|i|
-    EM.start_server(i['interface'], i['port'].to_i, IRC::Connection, server)
-    puts "started em-ircd server at: %s:%s" % i.values_at('interface', 'port')
+  server_sockets = ($config['listen'] || []).map{|i|
+    if i['ssl']
+      EM.start_server(i['interface'], i['port'].to_i, IRC::Connection_SSL, server)
+      puts "started em-ircd server at: %s:%s" % i.values_at('interface', 'port')
+    else
+      EM.start_server(i['interface'], i['port'].to_i, IRC::Connection, server)
+      puts "started ssl em-ircd server at: %s:%s" % i.values_at('interface', 'port')
+    end
   }
 
   EM.add_periodic_timer(60){
