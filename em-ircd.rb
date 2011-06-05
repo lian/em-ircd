@@ -884,10 +884,10 @@ module IRC
     end
 
     def validate_nick(nick)
-      nick =~ /^[a-zA-Z\[\]_|`^][a-zA-Z0-9\[\]_|`^]{0,#{($config['max_nick_length'].to_i-1)||23}}$/
+      nick =~ /^[a-zA-Z\[\]_|`^][a-zA-Z0-9\[\]_|\-`^]{0,#{($config['max_nick_length'].to_i-1)||23}}$/
     end
     def validate_chan(channel)
-      channel =~ /^\#[a-zA-Z0-9`~!@\#$%^&*\(\)\'";|}{\]\[.<>?]{0,#{($config['max_channel_length'].to_i-2)||23}}$/
+      channel =~ /^\#[a-zA-Z0-9\-`~!@\#$%^&*\(\)\'";|}{\]\[.<>?]{0,#{($config['max_channel_length'].to_i-2)||23}}$/
     end
     
     def prefix_for(channel, whois=false)
@@ -1108,6 +1108,8 @@ module IRC
     'private_key_file' => 'server.key',
     'cert_chain_file' => 'server.crt'
   }
+  # echo "DE\n\n\n\n\nem-ircd.testnet\nadmin@testnet\n" | \
+  #   openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout server.key -out server.crt
 end
 
 #
