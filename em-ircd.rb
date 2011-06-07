@@ -661,10 +661,12 @@ module IRC
       IRC.send_welcome_flood(self)
       IRC.change_umode(self, '+iwx')
       if channel = $config['welcome_channel']
+        unless $config['welcome_channel_ignore'].any{|r| @nick.match(r) }
         join_channel(channel)
         send_numeric(*IRC::Msg['RPL_INFO'], "------------")
         send_numeric(*IRC::Msg['RPL_INFO'], "  auto-joining: #{channel}")
         send_numeric(*IRC::Msg['RPL_INFO'], "------------")
+        end
      end
     end
 
@@ -1123,6 +1125,10 @@ begin
 rescue => ex
   $config = IRC::DefaultConfig.dup
 end
+
+$config['welcome_channel_ignore'] ||= []
+$config['welcome_channel_ignore'] =
+  $config['welcome_channel_ignore'].map{|i| Regex.new(i) }
 
 
 EM.run do
