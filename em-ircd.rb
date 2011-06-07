@@ -1128,7 +1128,7 @@ end
 
 $config['welcome_channel_ignore'] ||= []
 $config['welcome_channel_ignore'] =
-  $config['welcome_channel_ignore'].map{|i| Regex.new(i) }
+  $config['welcome_channel_ignore'].map{|i| Regexp.new(i) }
 
 
 EM.run do
@@ -1139,10 +1139,10 @@ EM.run do
   server_sockets = ($config['listen'] || []).map{|i|
     if i['ssl']
       EM.start_server(i['interface'], i['port'].to_i, IRC::Connection_SSL, server)
-      puts "started em-ircd server at: %s:%s" % i.values_at('interface', 'port')
+      puts "started ssl em-ircd server at: %s:%s" % i.values_at('interface', 'port')
     else
       EM.start_server(i['interface'], i['port'].to_i, IRC::Connection, server)
-      puts "started ssl em-ircd server at: %s:%s" % i.values_at('interface', 'port')
+      puts "started em-ircd server at: %s:%s" % i.values_at('interface', 'port')
     end
   }
 
