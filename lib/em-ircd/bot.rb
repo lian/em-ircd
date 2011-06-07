@@ -2,11 +2,16 @@ require 'eventmachine'
 
 module IRC
   class Bot < EM::Connection # simple bot class
+    def self.connect(host, port, *args, &blk)
+      EM.connect(host, port, self, [host, port], *args, blk)
+    end
+
+
     attr_reader :nick, :channels
     attr_reader :on_privmsg, :on_join, :on_unkown
 
-    def initialize(sockaddr, nick, channels, cfg={}, rebind_cb=nil)
-      @_sockaddr, @rebind_cb = sockaddr, rebind_cb
+    def initialize(sockaddr, nick, channels, cfg={}, rebind_cb=nil, &rebind_blk)
+      @_sockaddr, @rebind_cb = sockaddr, (rebind_cb || rebind_blk)
 
       @nick, @channels = nick, channels
       @cfg = cfg
@@ -14,6 +19,8 @@ module IRC
       @on_privmsg = EM::Channel.new
       @on_join    = EM::Channel.new
       @on_unkown  = EM::Channel.new
+
+      @rebind_cb && @rebind_cb.call( self )
     end
 
     MSG_LOGIN = "NICK %s\nUSER %s %s 0.0.0.0 :%s\nMODE %s +i\n"
@@ -28,6 +35,8 @@ module IRC
         @handshake_completed = true
         post_init_plain
       end
+    rescue Exception => ex
+      p [ex.message, ex.backtrace]
     end
 
     def ssl_verify_peer(cert)
@@ -98,32 +107,57 @@ module IRC
     end
 
     def rebind!
-      @rebind_cb && @rebind_cb.call(
-        EM.connect(*@_sockaddr, self.class, @_sockaddr, @nick, @channels, @cfg, @rebind_cb) )
+      @rebind_cb && EM.connect(*@_sockaddr, self.class, @_sockaddr, @nick, @channels, @cfg, @rebind_cb)
     end
 
     def list_channels
       @channels.each{|i| send_data('NAMES %s\n' % [i]) }
     end
-
-    def self.connect(host, port, *args)
-      EM.connect(host, port, self, [host, port], *args)
-    end
   end
 end
 
 
+
 if __FILE__ == $0
+
+  # simple bot example
   EM.run do
 
-    bot = IRC::Bot.connect('127.0.0.1', 6667, 'em-bot', ['#welcome', '#eventmachine'])
-    bot.on_privmsg.subscribe{|from,channel,msg|
-      p ['privmsg callback', from,channel,msg]
-    }
+    nick     = 'em-bot-' + Process.pid.to_s
+    channels = ['#testing']
+    config   = {}  # or: 'ssl' => true
 
-    bot.on_unkown.subscribe{|time,line|
-      p ['unkown line', time, line]
-    }
+
+    IRC::Bot.connect('127.0.0.1', 6667, nick, channels, config) do |bot|
+
+      bot.on_privmsg.subscribe{|from,channel,msg|
+        p ['privmsg', from, channel, msg]
+
+        begin
+        case msg
+
+          when /(.+): help$/
+            if $1 == bot.nick
+              bot.privmsg(channel, "noch keine hilfe..")
+            end
+
+          when /(.+): part!$/
+            if $1 == bot.nick
+              bot.privmsg(channel, "bye bye.")
+              EM.add_timer(2){ EM.stop }
+            end
+
+        end
+        rescue Exception => ex
+          p [ex.message, ex.backtrace]
+        end
+      }
+
+      bot.on_unkown.subscribe{|time,line|
+        p ['raw line', time, line]
+      }
+
+    end
 
   end
 end
