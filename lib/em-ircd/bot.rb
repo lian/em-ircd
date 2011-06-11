@@ -2,8 +2,8 @@ require 'eventmachine'
 
 module IRC
   class Bot < EM::Connection # simple bot class
-    def self.connect(host, port, *args, &blk)
-      EM.connect(host, port, self, [host, port], *args, blk)
+    def self.connect(host, port, nick, channels=[], config={}, &blk)
+      EM.connect(host, port, self, [host, port], nick, channels, config, blk)
     end
 
 
@@ -19,8 +19,6 @@ module IRC
       @on_privmsg = EM::Channel.new
       @on_join    = EM::Channel.new
       @on_unkown  = EM::Channel.new
-
-      @rebind_cb && @rebind_cb.call( self )
     end
 
     MSG_LOGIN = "NICK %s\nUSER %s %s 0.0.0.0 :%s\nMODE %s +i\n"
@@ -44,9 +42,10 @@ module IRC
     end
 
     def post_init_plain
+      @rebind_cb && @rebind_cb.call( self )
       init_buffer
       login!
-      @channels[0..0].each{|i| join_channel(i) }
+      @channels.each{|i| join_channel(i) }
     end
 
     def ssl_handshake_completed
